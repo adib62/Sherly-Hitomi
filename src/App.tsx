@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Avatar } from './Avatar';
+import { OrbitControls } from '@react-three/drei';
 
 function App() {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
@@ -115,7 +116,11 @@ function App() {
           <ambientLight intensity={1.5} />
           <directionalLight position={[1, 2, 3]} intensity={1.5} />
           {/* Oper state analyser ke dalam avatar */}
-          <Avatar url="/sherly.vrm" analyser={analyser} />
+          <Suspense fallback={null}>
+            <Avatar url="/SherlyHitomi_.vrm" analyser={analyser} />
+          </Suspense>
+          {/* OrbitControls agar bisa diputar dan di-zoom dengan scroll mouse */}
+          <OrbitControls target={[0, 1.3, 0]} />
         </Canvas>
       </div>
 
