@@ -47,20 +47,15 @@ async def voice_chat(file: UploadFile = File(...)):
         # 1. Baca file audio mentah yang dikirim oleh React teman lu
         audio_bytes = await file.read()
         
-        # Sediakan wadah file di memori agar bisa dibaca SDK
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "input.wav" 
-
-        # 2. [STT] Kirim ke ElevenLabs untuk diubah jadi Teks Tulisan
-        # Menggunakan model dasar 'scribe' untuk Speech-to-Text
-        stt_result = twelve_client.speech_to_text.transcribe(
-            file=audio_file,
-            model_id="scribe"
+        # 2. [STT] Kirim ke Groq Whisper untuk diubah jadi Teks Tulisan (Sangat Cepat & 100% Gratis!)
+        stt_result = groq_client.audio.transcriptions.create(
+            file=("user_input.wav", audio_bytes),
+            model="whisper-large-v3"
         )
         user_text = stt_result.text
         print(f"User berkata: {user_text}")
 
-        # 3. [OTAK AI] Kirim teks ke Groq (Pakai Llama 3 atau Mixtral biar kenceng)
+        # 3. [OTAK AI] Kirim teks ke Groq (Pakai Llama 3.1 8B Instant yang super cepat dan aktif)
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
@@ -72,17 +67,16 @@ async def voice_chat(file: UploadFile = File(...)):
                     "content": user_text
                 }
             ],
-            model="llama3-8b-8192", # Model andalan Groq yang super cepat
+            model="llama-3.1-8b-instant",
         )
         ai_response = chat_completion.choices[0].message.content
         print(f"Respon SerlyHitomi: {ai_response}")
 
-        # 4. [TTS] Ubah teks jawaban Groq tadi menjadi suara lewat ElevenLabs
-        # Kita pakai model multilingual v2 agar pelafalan bahasa Indonesianya natural
-        audio_generator = twelve_client.generate(
+        # 4. [TTS] Ubah teks jawaban Groq tadi menjadi suara lewat ElevenLabs (Menggunakan SDK 2.x terbaru)
+        audio_generator = twelve_client.text_to_speech.convert(
+            voice_id="EXAVITQu4vr4xnSDxMaL",  # ID untuk suara "Bella"
             text=ai_response,
-            voice="Bella", # Bisa diganti ID/Nama Voice ElevenLabs favorit lu
-            model="eleven_multilingual_v2"
+            model_id="eleven_multilingual_v2"
         )
 
         # Ubah generator menjadi bytes utuh

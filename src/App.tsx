@@ -7,6 +7,7 @@ function App() {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [statusText, setStatusText] = useState<string>("Siap bicara!");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -18,6 +19,7 @@ function App() {
   // 1. Mulai Rekam Suara User
   const startRecording = async () => {
     audioChunksRef.current = [];
+    setStatusText("Meminta izin mikrofon...");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -34,8 +36,10 @@ function App() {
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err) {
+      setStatusText("Merekam... Lepas tombol untuk kirim.");
+    } catch (err: any) {
       console.error("Gagal akses mic untuk merekam:", err);
+      setStatusText(`Error Mic: ${err.message || err}. Pastikan izin mic aktif!`);
     }
   };
 
@@ -51,8 +55,8 @@ function App() {
   // 3. Kirim File Audio ke API FastAPI Temen Lu
   const sendAudioToBackend = async (audioBlob: Blob) => {
     setIsLoading(true);
+    setStatusText("Mengirim suara ke Serly AI...");
     const formData = new FormData();
-    // Key harus "file" sesuai di parameter FastAPI temen lu: voice_chat(file: UploadFile = File(...))
     formData.append("file", audioBlob, "user_input.wav");
 
     try {
@@ -61,16 +65,15 @@ function App() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Gagal merespon dari API");
+      if (!response.ok) throw new Error(`HTTP ${response.status}: Gagal merespon dari API`);
 
-      // Terima stream MP3 hasil olahan ElevenLabs
       const resBlob = await response.blob();
       const audioUrl = URL.createObjectURL(resBlob);
 
-      // Putar audio dan sinkronkan ke Avatar
       playResponseAudio(audioUrl);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error pas manggil API:", error);
+      setStatusText(`Gagal: ${error.message || error}. Pastikan uvicorn backend (main.py) menyala!`);
     } finally {
       setIsLoading(false);
     }
@@ -78,7 +81,6 @@ function App() {
 
   // 4. Putar Suara Balasan AI & Sambungkan Analyser-nya ke Avatar
   const playResponseAudio = (url: string) => {
-    // Inisialisasi AudioContext & Analyser Node sekali saja (Singleton Pattern)
     if (!audioContextRef.current) {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioContextClass();
@@ -86,24 +88,36 @@ function App() {
       ana.fftSize = 256;
 
       const audioEl = new Audio();
-      // Hubungkan elemen audio ke context agar bisa dibaca frekuensinya
       const source = ctx.createMediaElementSource(audioEl);
       source.connect(ana);
-      ana.connect(ctx.destination); // Output tetap keluar ke speaker laptop
+      ana.connect(ctx.destination);
 
       audioContextRef.current = ctx;
       audioElementRef.current = audioEl;
       setAnalyser(ana);
     }
 
-    // Hindari autoplays block kebijakan browser
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
 
     if (audioElementRef.current) {
       audioElementRef.current.src = url;
-      audioElementRef.current.play();
+      setStatusText("Serly sedang menjawab...");
+      
+      audioElementRef.current.onended = () => {
+        setStatusText("Siap bicara!");
+      };
+      
+      audioElementRef.current.onerror = (e) => {
+        setStatusText("Gagal memutar audio balasan.");
+        console.error("Audio playback error:", e);
+      };
+
+      audioElementRef.current.play().catch(err => {
+        console.error("Play failed:", err);
+        setStatusText("Klik layar terlebih dahulu untuk mengaktifkan audio.");
+      });
     }
   };
 
@@ -126,7 +140,24 @@ function App() {
 
       {/* SEKTOR INTERAKSI / CHAT BAR */}
       <div style={{ width: '30%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', borderLeft: '1px solid #333' }}>
-        <h2 style={{ color: 'white', marginBottom: '20px' }}>SerlyHitomi AI</h2>
+        <h2 style={{ color: 'white', marginBottom: '10px' }}>SerlyHitomi AI</h2>
+        
+        {/* Status indicator box */}
+        <div style={{ 
+          backgroundColor: '#2b2b2b', 
+          color: statusText.startsWith('Gagal') || statusText.startsWith('Error') ? '#ff4d4d' : '#4da6ff',
+          padding: '10px 20px', 
+          borderRadius: '10px', 
+          marginBottom: '20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          textAlign: 'center',
+          maxWidth: '80%',
+          wordBreak: 'break-word',
+          border: '1px solid #444'
+        }}>
+          Status: {statusText}
+        </div>
 
         {isLoading ? (
           <p style={{ color: '#aaa' }}>Serly sedang berpikir & bersuara...</p>
@@ -145,7 +176,8 @@ function App() {
               backgroundColor: isRecording ? '#ff4d4d' : '#4da6ff',
               color: 'white',
               fontWeight: 'bold',
-              transition: '0.2s'
+              transition: '0.2s',
+              boxShadow: isRecording ? '0 0 15px #ff4d4d' : 'none'
             }}
           >
             {isRecording ? "Lepas untuk Kirim..." : "Tahan untuk Bicara"}
