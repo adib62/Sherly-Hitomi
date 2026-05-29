@@ -8,7 +8,7 @@ function App() {
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#1a1a1a' }}>
 
       {/* Panggung Utama 3D (Canvas) */}
-      <Canvas camera={{ position: [0, 1.3, 1.5], fov: 40 }}>
+      <Canvas camera={{ position: [0, 1.3, 1.5], fov: 40, near: 0.01 }}>
 
         {/* Lampu Ruangan (Biar karakternya terang merata) */}
         <ambientLight intensity={1.5} />
