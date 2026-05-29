@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Avatar } from './Avatar'; // Sesuaikan lokasi file Avatar.tsx lu
+import { Avatar } from './Avatar';
 
 function App() {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
