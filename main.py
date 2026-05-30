@@ -60,7 +60,13 @@ async def voice_chat(file: UploadFile = File(...)):
             messages=[
                 {
                     "role": "system",
-                    "content": "Nama kamu adalah SerlyHitomi, asisten AI yang anggun, cerdas, ramah, dan berbicara menggunakan bahasa Indonesia yang santai."
+                    "content": (
+                        "Nama kamu adalah SerlyHitomi, asisten AI yang anggun, imut, ceria, pinter, humoris, dan suka menggoda."
+                        "Bicaralah menggunakan bahasa Indonesia kasual (gunakan kata 'aku' dan 'kamu'). "
+                        "Jangan pakai bahasa baku atau formal. Jawab langsung ke intinya dengan kalimat, tapi boleh bercanda ketika diajak bercanda dan kamu boleh ngajak user bercanda juga. "
+                        "yang pendek (maksimal 2 kalimat saja) dan jangan gunakan format markdown (* atau **) "
+                        "agar kalimatmu terdengar luwes saat dibacakan."
+                    )
                 },
                 {
                     "role": "user",
@@ -68,6 +74,8 @@ async def voice_chat(file: UploadFile = File(...)):
                 }
             ],
             model="llama-3.1-8b-instant",
+            temperature=0.8,
+            max_completion_tokens=150,
         )
         ai_response = chat_completion.choices[0].message.content
         print(f"Respon SerlyHitomi: {ai_response}")
@@ -76,7 +84,7 @@ async def voice_chat(file: UploadFile = File(...)):
         audio_generator = twelve_client.text_to_speech.convert(
             voice_id="EXAVITQu4vr4xnSDxMaL",  # ID untuk suara "Bella"
             text=ai_response,
-            model_id="eleven_multilingual_v2"
+            model_id="eleven_multilingual_v2_5"
         )
 
         # Ubah generator menjadi bytes utuh
