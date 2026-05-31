@@ -52,6 +52,9 @@ function App() {
     }
   };
 
+  // Ref untuk menyimpan interval lip-sync agar bisa di-clear
+  const lipsyncIntervalRef = useRef<any>(null);
+
   // 3. Kirim File Audio ke API FastAPI Temen Lu
   const sendAudioToBackend = async (audioBlob: Blob) => {
     setIsLoading(true);
@@ -65,22 +68,126 @@ function App() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}: Gagal merespon dari API`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText || "Gagal merespon dari API"}`);
+      }
 
-      const resBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(resBlob);
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data.status === "fallback") {
+          console.warn("ElevenLabs TTS failed, using Web Speech API fallback:", data.error);
+          playFallbackSpeech(data.text);
+        } else {
+          throw new Error(data.message || "Terjadi kesalahan di backend.");
+        }
+      } else {
+        // Matikan jika ada SpeechSynthesis yang sedang berjalan
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+        }
 
-      playResponseAudio(audioUrl);
+        // Ambil teks respon AI dari header jika ada
+        const safeText = response.headers.get("X-AI-Response-Text");
+        const aiResponseText = safeText ? decodeURIComponent(safeText) : "Serly sedang menjawab...";
+
+        const resBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(resBlob);
+
+        playResponseAudio(audioUrl, aiResponseText);
+      }
     } catch (error: any) {
       console.error("Error pas manggil API:", error);
-      setStatusText(`Gagal: ${error.message || error}. Pastikan uvicorn backend (main.py) menyala!`);
+      setStatusText(`Gagal: ${error.message || error}. Pastikan backend menyala!`);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Simulasi gerakan mulut (lip sync) untuk Web Speech API
+  const simulateMouthMovement = (text: string) => {
+    if (lipsyncIntervalRef.current) {
+      clearInterval(lipsyncIntervalRef.current);
+    }
+
+    // Durasi perkiraan berdasarkan panjang teks (sekitar 80ms per karakter)
+    const totalDuration = Math.max(1000, text.length * 85);
+    let elapsed = 0;
+
+    const interval = setInterval(() => {
+      elapsed += 80;
+      if (elapsed >= totalDuration) {
+        clearInterval(interval);
+        setAnalyser(null);
+        lipsyncIntervalRef.current = null;
+      } else {
+        // Buat mock AnalyserNode khusus untuk dibaca Avatar.tsx
+        const mockAnalyser = {
+          frequencyBinCount: 1,
+          getByteFrequencyData: (array: Uint8Array) => {
+            // Berikan nilai acak tinggi-rendah agar mulut model terbuka-tutup realistis
+            array[0] = 10 + Math.random() * 45; 
+          }
+        } as unknown as AnalyserNode;
+        setAnalyser(mockAnalyser);
+      }
+    }, 80);
+
+    lipsyncIntervalRef.current = interval;
+  };
+
+  // Putar suara menggunakan Web Speech API (sebagai cadangan jika ElevenLabs error)
+  const playFallbackSpeech = (text: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      if (lipsyncIntervalRef.current) {
+        clearInterval(lipsyncIntervalRef.current);
+        setAnalyser(null);
+      }
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Cari suara bahasa Indonesia yang pas jika tersedia
+      const voices = window.speechSynthesis.getVoices();
+      const idVoice = voices.find(v => v.lang.startsWith('id') || v.lang.startsWith('in'));
+      if (idVoice) {
+        utterance.voice = idVoice;
+      }
+      
+      utterance.onstart = () => {
+        setStatusText(text);
+        simulateMouthMovement(text);
+      };
+
+      utterance.onend = () => {
+        setStatusText("Siap bicara!");
+        if (lipsyncIntervalRef.current) {
+          clearInterval(lipsyncIntervalRef.current);
+          lipsyncIntervalRef.current = null;
+        }
+        setAnalyser(null);
+      };
+
+      utterance.onerror = (e) => {
+        console.error("SpeechSynthesis error:", e);
+        setStatusText("Gagal memutar suara.");
+        if (lipsyncIntervalRef.current) {
+          clearInterval(lipsyncIntervalRef.current);
+          lipsyncIntervalRef.current = null;
+        }
+        setAnalyser(null);
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      setStatusText(text);
+      console.warn("Browser tidak mendukung SpeechSynthesis.");
+    }
+  };
+
   // 4. Putar Suara Balasan AI & Sambungkan Analyser-nya ke Avatar
-  const playResponseAudio = (url: string) => {
+  const playResponseAudio = (url: string, text: string) => {
     if (!audioContextRef.current) {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioContextClass();
@@ -103,7 +210,7 @@ function App() {
 
     if (audioElementRef.current) {
       audioElementRef.current.src = url;
-      setStatusText("Serly sedang menjawab...");
+      setStatusText(text);
       
       audioElementRef.current.onended = () => {
         setStatusText("Siap bicara!");

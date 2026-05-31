@@ -1,72 +1,69 @@
 import os
-from fastapi import FastAPI, UploadFile, File
+import tempfile
+import edge_tts
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 # pyrefly: ignore [missing-import]
 from groq import Groq
-# pyrefly: ignore [missing-import]
-from elevenlabs.client import ElevenLabs
-import io
+from dotenv import load_dotenv
 
 app = FastAPI(title="SerlyHitomi AI Assistant API")
 
-# Konfigurasi CORS agar React teman lu bisa akses
+# Konfigurasi CORS buat React lu
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=["http://localhost:5173"],  # Sesuaikan port React lu
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ====== SETUP API KEYS ======
-from dotenv import load_dotenv
-
 load_dotenv()
-
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
-# Inisialisasi Client
+# Inisialisasi Groq Client
 groq_client = Groq(api_key=GROQ_API_KEY)
-twelve_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
+# Fungsi buat hapus file sampah (biar SSD laptop temen lu ga penuh)
+def hapus_file_temp(path: str):
+    if os.path.exists(path):
+        os.remove(path)
 
 @app.get("/")
 def index():
-    return {"status": "running", "assistant_name": "SerlyHitomi"}
+    return {"status": "running", "assistant_name": "SerlyHitomi", "tts_engine": "Edge-TTS"}
 
-# ====== ENDPOINT UTAMA: PROSES SUARA ======
+# ====== ENDPOINT UTAMA ======
 @app.post("/api/voice-chat")
-async def voice_chat(file: UploadFile = File(...)):
+async def voice_chat(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    tmp_in_path = ""
+    tmp_out_path = ""
+    
     try:
-        # 1. Baca file audio mentah yang dikirim oleh React teman lu
+        # 1. BACA SUARA USER & SIMPAN KE FILE SEMENTARA
         audio_bytes = await file.read()
-        
-        # 2. [STT] Kirim ke Groq Whisper untuk diubah jadi Teks Tulisan (Sangat Cepat & 100% Gratis!)
-        stt_result = groq_client.audio.transcriptions.create(
-            file=("user_input.wav", audio_bytes),
-            model="whisper-large-v3"
-        )
-        user_text = stt_result.text
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_in:
+            tmp_in.write(audio_bytes)
+            tmp_in_path = tmp_in.name
+
+        # 2. [STT] UBAH SUARA USER JADI TEKS VIA GROQ WHISPER (100% GRATIS)
+        with open(tmp_in_path, "rb") as audio_file:
+            transcription = groq_client.audio.transcriptions.create(
+                file=("input.wav", audio_file),
+                model="whisper-large-v3",
+                prompt="Teks ini berbahasa Indonesia." # Bantu AI ngenalin bahasa
+            )
+        user_text = transcription.text
         print(f"User berkata: {user_text}")
 
-        # 3. [OTAK AI] Kirim teks ke Groq (Pakai Llama 3.1 8B Instant yang super cepat dan aktif)
+        # 3. [OTAK AI] KIRIM TEKS KE LLAMA 3 VIA GROQ
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "Nama kamu adalah SerlyHitomi, asisten AI yang anggun, imut, ceria, pinter, humoris, dan suka menggoda."
-                        "Bicaralah menggunakan bahasa Indonesia kasual (gunakan kata 'aku' dan 'kamu'). "
-                        "Jangan pakai bahasa baku atau formal. Jawab langsung ke intinya dengan kalimat, tapi boleh bercanda ketika diajak bercanda dan kamu boleh ngajak user bercanda juga. "
-                        "yang pendek (maksimal 2 kalimat saja) dan jangan gunakan format markdown (* atau **) "
-                        "agar kalimatmu terdengar luwes saat dibacakan."
-                    )
+                    "content": "Nama kamu adalah SerlyHitomi, asisten AI yang anggun, cerdas, ramah, dan berbicara menggunakan bahasa Indonesia yang santai. Jawab dengan singkat dan padat."
                 },
                 {
                     "role": "user",
@@ -74,28 +71,43 @@ async def voice_chat(file: UploadFile = File(...)):
                 }
             ],
             model="llama-3.1-8b-instant",
-            temperature=0.8,
-            max_completion_tokens=150,
         )
         ai_response = chat_completion.choices[0].message.content
-        print(f"Respon SerlyHitomi: {ai_response}")
+        print(f"Respon Serly: {ai_response}")
 
-        # 4. [TTS] Ubah teks jawaban Groq tadi menjadi suara lewat ElevenLabs (Menggunakan SDK 2.x terbaru)
-        audio_generator = twelve_client.text_to_speech.convert(
-            voice_id="EXAVITQu4vr4xnSDxMaL",  # ID untuk suara "Bella"
-            text=ai_response,
-            model_id="eleven_multilingual_v2_5"
-        )
+        # 4. [TTS] UBAH JAWABAN AI JADI SUARA VIA EDGE-TTS
+        # Pakai suara 'Gadis' dari Microsoft Azure
+        voice = "id-ID-GadisNeural" 
+        communicate = edge_tts.Communicate(ai_response, voice)
+        
+        # Bikin wadah sementara buat file MP3-nya
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
+            tmp_out_path = tmp_out.name
+            
+        # Proses rendering suara
+        await communicate.save(tmp_out_path)
 
-        # Ubah generator menjadi bytes utuh
-        audio_output = b"".join(audio_generator)
+        # 5. BERSIH-BERSIH FILE SEMENTARA
+        # Hapus file input.wav user karena udah ga kepake
+        hapus_file_temp(tmp_in_path) 
+        # Hapus file mp3 setelah selesai di-download sama React lu
+        background_tasks.add_task(hapus_file_temp, tmp_out_path)
 
-        # 5. Kirim balik file audio .mp3 langsung sebagai stream ke React teman lu
-        return StreamingResponse(
-            io.BytesIO(audio_output), 
+        # 6. KIRIM FILE MP3 KE REACT
+        import urllib.parse
+        safe_text = urllib.parse.quote(ai_response)
+        
+        return FileResponse(
+            tmp_out_path, 
             media_type="audio/mpeg",
-            headers={"Content-Disposition": "attachment; filename=response.mp3"}
+            headers={
+                "Content-Disposition": "attachment; filename=response.mp3",
+                "X-AI-Response-Text": safe_text
+            }
         )
 
     except Exception as e:
+        # Kalau error, pastikan file sisa tetep dihapus
+        hapus_file_temp(tmp_in_path)
+        hapus_file_temp(tmp_out_path)
         return {"status": "error", "message": str(e)}
